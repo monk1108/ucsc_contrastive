@@ -1,0 +1,1 @@
+my modified CLIP implementation on Chest X-ray using https://github.com/facebookresearch/SLIP.

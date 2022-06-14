@@ -1,0 +1,11 @@
+python run_with_submitit_finetune.py \
+    --batch_size 128 --enable_deepspeed \
+    --epochs 100 --warmup_epochs 20 \
+    --model beit_base_patch16_224 --nb_classes 1000 \
+    --imagenet_default_mean_and_std \
+    --model_key state_dict --model_prefix module.visual. \
+    --disable_rel_pos_bias --abs_pos_emb --use_cls \
+    --mixup 0.8 --cutmix 1 \
+    --layer_scale_init_value 0 \
+    --lr 4e-3 --drop_path 0.1 --layer_decay 0.65 \
+    --output_dir ./myoutput --finetune ./mycheckpoint
