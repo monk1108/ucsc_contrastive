@@ -43,6 +43,7 @@ from scipy import interpolate
 import modeling_finetune
 
 from DatasetGenerator import *
+from mimic.mimic_dataset import *
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = 0
 
@@ -252,15 +253,22 @@ def main(args, parser):
     # else:
     #     dataset_val, _ = build_dataset(is_train=False, args=args)
 
-    pathDirData = args.data_path
-    pathFileTrain = './data_txt/train_1.txt'
-    pathFileVal = './data_txt/val_1.txt'
-    pathFileTest = './data_txt/test_1.txt'
-    transform_train = create_transform(224, is_training=True)
-    transform_val = create_transform(224, is_training=False)
-    dataset_train = DatasetGenerator(pathDirData, pathFileTrain, transform_train) 
-    dataset_val = DatasetGenerator(pathDirData, pathFileVal, transform_val)
-    dataset_test = DatasetGenerator(pathDirData, pathFileTest, transform_val)
+    # yaoyinuo 2022.6.15
+    # below for chestxray
+    # pathDirData = args.data_path
+    # pathFileTrain = './data_txt/train_1.txt'
+    # pathFileVal = './data_txt/val_1.txt'
+    # pathFileTest = './data_txt/test_1.txt'
+    # transform_train = create_transform(224, is_training=True)
+    # transform_val = create_transform(224, is_training=False)
+    # dataset_train = DatasetGenerator(pathDirData, pathFileTrain, transform_train) 
+    # dataset_val = DatasetGenerator(pathDirData, pathFileVal, transform_val)
+    # dataset_test = DatasetGenerator(pathDirData, pathFileTest, transform_val)
+    
+    # below for mimic-cxr
+    dataset_train = MimicDataset("train")
+    dataset_val = MimicDataset("validate")
+    dataset_test = MimicDataset("test")
     print("Train data length:", len(dataset_train))
     print("Valid data length:", len(dataset_val))
     print("Test data length:", len(dataset_test))
@@ -294,12 +302,15 @@ def main(args, parser):
     else:
         log_writer = None
 
+    # DataLoader(d, batch_size=16, shuffle=True, collate_fn=my_collate)
+
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
+        collate_fn=my_collate
     )
 
     data_loader_test = torch.utils.data.DataLoader(
@@ -307,7 +318,8 @@ def main(args, parser):
         batch_size=int(1.5 * args.batch_size),
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False
+        drop_last=False,
+        collate_fn=my_collate
     )
 
 
@@ -317,7 +329,8 @@ def main(args, parser):
             batch_size=int(1.5 * args.batch_size),
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
-            drop_last=False
+            drop_last=False,
+            collate_fn=my_collate
         )
     else:
         data_loader_val = None
