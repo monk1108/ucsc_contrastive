@@ -310,7 +310,6 @@ def main(args, parser):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn=my_collate
     )
 
     data_loader_test = torch.utils.data.DataLoader(
@@ -319,7 +318,6 @@ def main(args, parser):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False,
-        collate_fn=my_collate
     )
 
 
@@ -330,7 +328,6 @@ def main(args, parser):
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=False,
-            collate_fn=my_collate
         )
     else:
         data_loader_val = None
@@ -591,7 +588,7 @@ def main(args, parser):
 
     if args.eval:
         test_stats = evaluate(data_loader_test, model, device)
-        print(f"Accuracy of the network on the {len(dataset_test)} test images: {test_stats['meanAUC']:.4f}%")
+        print(f"Accuracy of the network on the {len(dataset_test)} test images: {test_stats['auc_mean']:.4f}%")
         print(test_stats)
         exit(0)
 
