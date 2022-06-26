@@ -47,7 +47,7 @@ from DatasetGenerator import *
 from mimic.mimic_dataset import *
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "6, 7"
+os.environ['CUDA_VISIBLE_DEVICES'] = "3, 4"
 
 def get_args_parser():
     parser = argparse.ArgumentParser('BEiT fine-tuning and evaluation script for image classification', add_help=False)
@@ -617,20 +617,20 @@ def main(args, parser):
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                     loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema)
         if data_loader_val is not None:
-            test_stats = evaluate(data_loader_val, model, device)   # auc_mean
+            val_stats = evaluate(data_loader_val, model, device)   # auc_mean
             # yaoyinuo 2022.5.7
-            # print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-            # if max_accuracy < test_stats["acc1"]:
-            #     max_accuracy = test_stats["acc1"]
-            print("Mean AUC of the network on the {} test images: {:.4f}".format(len(dataset_val), test_stats['auc_mean']))
+            # print(f"Accuracy of the network on the {len(dataset_val)} test images: {val_stats['acc1']:.1f}%")
+            # if max_accuracy < val_stats["acc1"]:
+            #     max_accuracy = val_stats["acc1"]
+            print("Mean AUC of the network on the {} val images: {:.4f}".format(len(dataset_val), val_stats['auc_mean']))
             # #########################################################
             print("###################################################################")
-            print(test_stats['auc_mean'])
+            print(val_stats['auc_mean'])
             print(max_auc)
-            print(type(test_stats['auc_mean']))
+            print(type(val_stats['auc_mean']))
             print(type(max_auc))
-            if max_auc < test_stats['auc_mean']:
-                max_auc = test_stats['auc_mean']
+            if max_auc < val_stats['auc_mean']:
+                max_auc = val_stats['auc_mean']
                 if args.output_dir and args.save_ckpt:
                     utils.save_model(
                         args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
@@ -639,26 +639,64 @@ def main(args, parser):
             # print(f'Max accuracy: {max_accuracy:.2f}%')
 
             if log_writer is not None:
+                # log_writer.update(test_acc1=val_stats['acc1'], head="perf", step=epoch)
+                # log_writer.update(test_acc5=val_stats['acc5'], head="perf", step=epoch)
+                log_writer.update(meanAUC=val_stats['auc_mean'], head="VAL/meanAUC", step=epoch)
+                log_writer.update(test_loss=val_stats['loss'], head="VAL/perf", step=epoch)
+                log_writer.update(AUC1=val_stats['AUC1'], head="VAL/AUC1", step=epoch)
+                log_writer.update(AUC2=val_stats['AUC2'], head="VAL/AUC2", step=epoch)
+                log_writer.update(AUC3=val_stats['AUC3'], head="VAL/AUC3", step=epoch)
+                log_writer.update(AUC4=val_stats['AUC4'], head="VAL/AUC4", step=epoch)
+                log_writer.update(AUC5=val_stats['AUC5'], head="VAL/AUC5", step=epoch)
+                log_writer.update(AUC6=val_stats['AUC6'], head="VAL/AUC6", step=epoch)
+                log_writer.update(AUC7=val_stats['AUC7'], head="VAL/AUC7", step=epoch)
+                log_writer.update(AUC8=val_stats['AUC8'], head="VAL/AUC8", step=epoch)
+                log_writer.update(AUC9=val_stats['AUC9'], head="VAL/AUC9", step=epoch)
+                log_writer.update(AUC10=val_stats['AUC10'], head="VAL/AUC10", step=epoch)
+                log_writer.update(AUC11=val_stats['AUC11'], head="VAL/AUC11", step=epoch)
+                log_writer.update(AUC12=val_stats['AUC12'], head="VAL/AUC12", step=epoch)
+                log_writer.update(AUC13=val_stats['AUC13'], head="VAL/AUC13", step=epoch)
+                log_writer.update(AUC14=val_stats['AUC14'], head="VAL/AUC14", step=epoch)
+
+
+        if data_loader_test is not None:
+            test_stats = evaluate(data_loader_test, model, device)   # auc_mean
+            # yaoyinuo 2022.5.7
+            # print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+            # if max_accuracy < test_stats["acc1"]:
+            #     max_accuracy = test_stats["acc1"]
+            print("Mean AUC of the network on the {} TEST images: {:.4f}".format(len(dataset_val), test_stats['auc_mean']))
+            # #########################################################
+            print("###################################################################")
+            print(test_stats['auc_mean'])
+            print(max_auc)
+            print(type(test_stats['auc_mean']))
+            print(type(max_auc))
+
+            # print(f'Max accuracy: {max_accuracy:.2f}%')
+
+            if log_writer is not None:
                 # log_writer.update(test_acc1=test_stats['acc1'], head="perf", step=epoch)
                 # log_writer.update(test_acc5=test_stats['acc5'], head="perf", step=epoch)
-                log_writer.update(meanAUC=test_stats['auc_mean'], head="meanAUC", step=epoch)
-                log_writer.update(test_loss=test_stats['loss'], head="perf", step=epoch)
-                log_writer.update(AUC1=test_stats['AUC1'], head="AUC1", step=epoch)
-                log_writer.update(AUC2=test_stats['AUC2'], head="AUC2", step=epoch)
-                log_writer.update(AUC3=test_stats['AUC3'], head="AUC3", step=epoch)
-                log_writer.update(AUC4=test_stats['AUC4'], head="AUC4", step=epoch)
-                log_writer.update(AUC5=test_stats['AUC5'], head="AUC5", step=epoch)
-                log_writer.update(AUC6=test_stats['AUC6'], head="AUC6", step=epoch)
-                log_writer.update(AUC7=test_stats['AUC7'], head="AUC7", step=epoch)
-                log_writer.update(AUC8=test_stats['AUC8'], head="AUC8", step=epoch)
-                log_writer.update(AUC9=test_stats['AUC9'], head="AUC9", step=epoch)
-                log_writer.update(AUC10=test_stats['AUC10'], head="AUC10", step=epoch)
-                log_writer.update(AUC11=test_stats['AUC11'], head="AUC11", step=epoch)
-                log_writer.update(AUC12=test_stats['AUC12'], head="AUC12", step=epoch)
-                log_writer.update(AUC13=test_stats['AUC13'], head="AUC13", step=epoch)
-                log_writer.update(AUC14=test_stats['AUC14'], head="AUC14", step=epoch)
+                log_writer.update(meanAUC=test_stats['auc_mean'], head="TEST/meanAUC", step=epoch)
+                log_writer.update(test_loss=test_stats['loss'], head="TEST/perf", step=epoch)
+                log_writer.update(AUC1=test_stats['AUC1'], head="TEST/AUC1", step=epoch)
+                log_writer.update(AUC2=test_stats['AUC2'], head="TEST/AUC2", step=epoch)
+                log_writer.update(AUC3=test_stats['AUC3'], head="TEST/AUC3", step=epoch)
+                log_writer.update(AUC4=test_stats['AUC4'], head="TEST/AUC4", step=epoch)
+                log_writer.update(AUC5=test_stats['AUC5'], head="TEST/AUC5", step=epoch)
+                log_writer.update(AUC6=test_stats['AUC6'], head="TEST/AUC6", step=epoch)
+                log_writer.update(AUC7=test_stats['AUC7'], head="TEST/AUC7", step=epoch)
+                log_writer.update(AUC8=test_stats['AUC8'], head="TEST/AUC8", step=epoch)
+                log_writer.update(AUC9=test_stats['AUC9'], head="TEST/AUC9", step=epoch)
+                log_writer.update(AUC10=test_stats['AUC10'], head="TEST/AUC10", step=epoch)
+                log_writer.update(AUC11=test_stats['AUC11'], head="TEST/AUC11", step=epoch)
+                log_writer.update(AUC12=test_stats['AUC12'], head="TEST/AUC12", step=epoch)
+                log_writer.update(AUC13=test_stats['AUC13'], head="TEST/AUC13", step=epoch)
+                log_writer.update(AUC14=test_stats['AUC14'], head="TEST/AUC14", step=epoch)
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                         **{f'val_{k}': v for k, v in val_stats.items()},
                          **{f'test_{k}': v for k, v in test_stats.items()},
                          'epoch': epoch,
                          'n_parameters': n_parameters}
