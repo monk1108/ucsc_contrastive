@@ -24,6 +24,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import json
 import os
+import sys
 
 from pathlib import Path
 
@@ -45,7 +46,8 @@ import modeling_finetune
 from DatasetGenerator import *
 from mimic.mimic_dataset import *
 
-# os.environ['CUDA_VISIBLE_DEVICES'] = 0
+
+os.environ['CUDA_VISIBLE_DEVICES'] = "6, 7"
 
 def get_args_parser():
     parser = argparse.ArgumentParser('BEiT fine-tuning and evaluation script for image classification', add_help=False)
@@ -310,7 +312,6 @@ def main(args, parser):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True,
-        collate_fn=my_collate
     )
 
     data_loader_test = torch.utils.data.DataLoader(
@@ -319,7 +320,6 @@ def main(args, parser):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False,
-        collate_fn=my_collate
     )
 
 
@@ -330,7 +330,6 @@ def main(args, parser):
             num_workers=args.num_workers,
             pin_memory=args.pin_mem,
             drop_last=False,
-            collate_fn=my_collate
         )
     else:
         data_loader_val = None
@@ -348,6 +347,7 @@ def main(args, parser):
     model = create_model(
         args.model,
         pretrained=False,
+        img_size = (args.input_size, args.input_size),
         num_classes=args.nb_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
@@ -591,7 +591,7 @@ def main(args, parser):
 
     if args.eval:
         test_stats = evaluate(data_loader_test, model, device)
-        print(f"Accuracy of the network on the {len(dataset_test)} test images: {test_stats['meanAUC']:.4f}%")
+        print(f"Accuracy of the network on the {len(dataset_test)} test images: {test_stats['auc_mean']:.4f}%")
         print(test_stats)
         exit(0)
 
@@ -681,7 +681,19 @@ def main(args, parser):
 
 if __name__ == '__main__':
     parser = get_args_parser()
+
     args, _ = parser.parse_known_args()
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    if args.log_dir:
+        Path(args.log_dir).mkdir(parents=True, exist_ok=True)
+
+
+    # if torch.distributed.get_rank() == 0:
+    txt_dir = args.log_dir + 'parameters.txt'
+    parameter_file = open(txt_dir, 'w')
+    print(sys.argv)
+    print(txt_dir)
+    parameter_file.write(str(sys.argv))
+
     main(args, parser)
