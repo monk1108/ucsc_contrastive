@@ -23,6 +23,8 @@ import utils
 from sklearn.metrics import roc_auc_score
 import numpy as np
 
+# os.environ['MASTER_ADDR'] = 'localhost'
+# os.environ['MASTER_PORT'] = '12123'
 # os.environ['CUDA_VISIBLE_DEVICES'] = 0
 
 def train_class_batch(model, samples, target, criterion):
@@ -30,6 +32,7 @@ def train_class_batch(model, samples, target, criterion):
     # print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
     # print(outputs.shape)
     # print(target.shape)
+    print(samples.shape)
     loss = criterion(outputs, target)
     
     return loss, outputs

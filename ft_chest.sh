@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 torchrun --nproc_per_node=2 --master_port 14285 chest_class_finetuning.py \
 --batch_size 24 --input_size 256 --eval \
+=======
+torchrun --nproc_per_node=8 --master_port 12123 chest_class_finetuning.py \
+--batch_size 128  \
+>>>>>>> 204866c513a90a117d0c24d060caa90a2fa78a16
     --epochs 100 --warmup_epochs 20 \
     --model beit_large_patch16_224 --nb_classes 14 \
     --imagenet_default_mean_and_std \
