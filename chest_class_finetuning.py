@@ -36,6 +36,7 @@ from timm.utils import ModelEma
 from timm.data.transforms import RandomResizedCropAndInterpolation
 from optim_factory import create_optimizer, get_parameter_groups, LayerDecayValueAssigner
 
+import torchvision.transforms as transforms
 from datasets import build_dataset
 from chest_engine_for_finetuning import train_one_epoch, evaluate
 from utils import NativeScalerWithGradNormCount as NativeScaler
@@ -44,17 +45,20 @@ from scipy import interpolate
 import modeling_finetune
 
 from DatasetGenerator import *
-from mimic.mimic_dataset import *
+# from mimic.mimic_dataset import *
+from chexpert_dataset import datasetTrain_frt, datasetValid_frt, datasetTest_frt
+from rsnaDataset import RSNA
+from preprocess_covidx import COVIDXImageDataset
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "3, 4"
+os.environ['CUDA_VISIBLE_DEVICES'] = "2, 3"
 
 def get_args_parser():
     parser = argparse.ArgumentParser('BEiT fine-tuning and evaluation script for image classification', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int)
     parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--update_freq', default=1, type=int)
-    parser.add_argument('--save_ckpt_freq', default=5, type=int)
+    parser.add_argument('--save_ckpt_freq', default=20, type=int)
 
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
@@ -166,6 +170,9 @@ def get_args_parser():
     # Dataset parameters
     # parser.add_argument('--data_path', default='zP', type=str,
     #                     help='dataset path')
+    
+    parser.add_argument('--dataset', default='chexpert', type=str,
+                        help='like chexpert, RSNA, covidx')
     parser.add_argument('--data_path', default='../chestxray/', type=str,
                         help='dataset path')
     parser.add_argument('--eval_data_path', default=None, type=str,
@@ -268,12 +275,67 @@ def main(args, parser):
     # dataset_test = DatasetGenerator(pathDirData, pathFileTest, transform_val)
     
     # below for mimic-cxr
-    dataset_train = MimicDataset("train")
-    dataset_val = MimicDataset("validate")
-    dataset_test = MimicDataset("test")
-    print("Train data length:", len(dataset_train))
-    print("Valid data length:", len(dataset_val))
-    print("Test data length:", len(dataset_test))
+    # dataset_train = MimicDataset("train")
+    # dataset_val = MimicDataset("validate")
+    # dataset_test = MimicDataset("test")
+    # print("Train data length:", len(dataset_train))
+    # print("Valid data length:", len(dataset_val))
+    # print("Test data length:", len(dataset_test))
+
+    # RSNA linear classification
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+    train_transform = transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        lambda x: x.convert('RGB'),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    val_transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        lambda x: x.convert('RGB'),
+        transforms.ToTensor(),
+        normalize,
+    ])
+
+    # below for CheXpert
+    if args.dataset == 'chexpert':
+        dataset_train = datasetTrain_frt
+        dataset_val = datasetValid_frt
+        dataset_test = datasetTest_frt
+        print("Train data length:", len(dataset_train))
+        print("Valid data length:", len(dataset_val))
+        print("Test data length:", len(dataset_test))
+
+
+    if args.dataset == 'rsna':
+        dataset_train = RSNA(csv_file='/data2/yinuo/rsna/train.csv',
+                            id_col = 'patientId',
+                            target_col = 'Target',
+                            root_dir='/data2/yinuo/rsna/train/',
+                            transform=train_transform)
+        dataset_val = RSNA(csv_file='/data2/yinuo/rsna/val.csv',
+                            id_col = 'patientId',
+                            target_col = 'Target',
+                            root_dir='/data2/yinuo/rsna/val/',
+                            transform=val_transform)
+        dataset_test = RSNA(csv_file='/data2/yinuo/rsna/test.csv',
+                            id_col = 'patientId',
+                            target_col = 'Target',
+                            root_dir='/data2/yinuo/rsna/test/',
+                            transform=val_transform)
+    
+    if args.dataset == 'covidx':
+        dataset_train = COVIDXImageDataset('train', train_transform)
+        dataset_val = COVIDXImageDataset('val', val_transform)
+        dataset_test = COVIDXImageDataset('test', val_transform)
+        print("Train data length:", len(dataset_train))
+        print("Valid data length:", len(dataset_val))
+        print("Test data length:", len(dataset_test))
+
+
 
 
     if True:  # args.distributed:
@@ -359,6 +421,8 @@ def main(args, parser):
         use_abs_pos_emb=args.abs_pos_emb,
         init_values=args.layer_scale_init_value,
     )
+
+    print("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh")
 
     patch_size = model.patch_embed.patch_size
     print("Patch size = %s" % str(patch_size))
@@ -465,7 +529,12 @@ def main(args, parser):
 
         # yaoyinuo 2022.5.7
         in_features = model.head.in_features
-        model.head = nn.Linear(in_features, 14)
+        # model.head = nn.Linear(in_features, 14)
+
+        if args.dataset == 'chexpert':
+            model.head = nn.Linear(in_features, 5)
+        else:
+            model.head = nn.Linear(in_features, 1)
 
         # interpolate position embedding
         if 'pos_embed' in checkpoint_model:
@@ -571,7 +640,10 @@ def main(args, parser):
     print("Max WD = %.7f, Min WD = %.7f" % (max(wd_schedule_values), min(wd_schedule_values)))
 
 
-    criterion = torch.nn.BCEWithLogitsLoss()
+    # if args.dataset == 'chexpert':
+    criterion = nn.BCEWithLogitsLoss().cuda()
+
+    # criterion = torch.nn.BCEWithLogitsLoss()
     # if mixup_fn is not None:
     #     # smoothing is handled with mixup label transform
     #     criterion = torch.nn.BCEWithLogitsLoss()
@@ -590,7 +662,7 @@ def main(args, parser):
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
 
     if args.eval:
-        test_stats = evaluate(data_loader_test, model, device)
+        test_stats = evaluate(data_loader_test, model, device, args)
         print(f"Accuracy of the network on the {len(dataset_test)} test images: {test_stats['auc_mean']:.4f}%")
         print(test_stats)
         exit(0)
@@ -599,17 +671,19 @@ def main(args, parser):
     start_time = time.time()
     # max_accuracy = 0.0
     max_auc = 0.0
+    max_acc = 0.0
     for epoch in range(args.start_epoch, args.epochs):
+        print(epoch)
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
         if log_writer is not None:
             log_writer.set_step(epoch * num_training_steps_per_epoch * args.update_freq)
-        train_stats = train_one_epoch(
-            model, criterion, data_loader_train, optimizer,
+        train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer,
             device, epoch, loss_scaler, args.clip_grad, model_ema, mixup_fn,
             log_writer=log_writer, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
-            num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
+            num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq, 
+            mydataset=args.dataset
         )
         if args.output_dir and args.save_ckpt:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
@@ -617,83 +691,129 @@ def main(args, parser):
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                     loss_scaler=loss_scaler, epoch=epoch, model_ema=model_ema)
         if data_loader_val is not None:
-            val_stats = evaluate(data_loader_val, model, device)   # auc_mean
+            val_stats = evaluate(data_loader_val, model, device, args)   # auc_mean
             # yaoyinuo 2022.5.7
             # print(f"Accuracy of the network on the {len(dataset_val)} test images: {val_stats['acc1']:.1f}%")
             # if max_accuracy < val_stats["acc1"]:
             #     max_accuracy = val_stats["acc1"]
-            print("Mean AUC of the network on the {} val images: {:.4f}".format(len(dataset_val), val_stats['auc_mean']))
+            if args.dataset == 'covidx':
+                print("Mean ACC of the network on the {} val images: {:.4f}".format(len(dataset_val), val_stats['acc']))
+            else:
+                print("Mean AUC of the network on the {} val images: {:.4f}".format(len(dataset_val), val_stats['auc_mean']))
             # #########################################################
             print("###################################################################")
-            print(val_stats['auc_mean'])
-            print(max_auc)
-            print(type(val_stats['auc_mean']))
-            print(type(max_auc))
-            if max_auc < val_stats['auc_mean']:
-                max_auc = val_stats['auc_mean']
-                if args.output_dir and args.save_ckpt:
-                    utils.save_model(
-                        args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                        loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)
+
+            if args.dataset == 'covidx':
+                print(val_stats['acc'])
+                print(max_acc)
+                print(type(val_stats['acc']))
+                print(type(max_acc))
+                if max_acc < val_stats['acc']:
+                    max_acc = val_stats['acc']
+                    if args.output_dir and args.save_ckpt:
+                        utils.save_model(
+                            args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                            loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)               
+
+            else:
+                print(val_stats['auc_mean'])
+                print(max_auc)
+                print(type(val_stats['auc_mean']))
+                print(type(max_auc))
+                if max_auc < val_stats['auc_mean']:
+                    max_auc = val_stats['auc_mean']
+                    if args.output_dir and args.save_ckpt:
+                        utils.save_model(
+                            args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                            loss_scaler=loss_scaler, epoch="best", model_ema=model_ema)
 
             # print(f'Max accuracy: {max_accuracy:.2f}%')
 
             if log_writer is not None:
                 # log_writer.update(test_acc1=val_stats['acc1'], head="perf", step=epoch)
                 # log_writer.update(test_acc5=val_stats['acc5'], head="perf", step=epoch)
-                log_writer.update(meanAUC=val_stats['auc_mean'], head="VAL/meanAUC", step=epoch)
-                log_writer.update(test_loss=val_stats['loss'], head="VAL/perf", step=epoch)
-                log_writer.update(AUC1=val_stats['AUC1'], head="VAL/AUC1", step=epoch)
-                log_writer.update(AUC2=val_stats['AUC2'], head="VAL/AUC2", step=epoch)
-                log_writer.update(AUC3=val_stats['AUC3'], head="VAL/AUC3", step=epoch)
-                log_writer.update(AUC4=val_stats['AUC4'], head="VAL/AUC4", step=epoch)
-                log_writer.update(AUC5=val_stats['AUC5'], head="VAL/AUC5", step=epoch)
-                log_writer.update(AUC6=val_stats['AUC6'], head="VAL/AUC6", step=epoch)
-                log_writer.update(AUC7=val_stats['AUC7'], head="VAL/AUC7", step=epoch)
-                log_writer.update(AUC8=val_stats['AUC8'], head="VAL/AUC8", step=epoch)
-                log_writer.update(AUC9=val_stats['AUC9'], head="VAL/AUC9", step=epoch)
-                log_writer.update(AUC10=val_stats['AUC10'], head="VAL/AUC10", step=epoch)
-                log_writer.update(AUC11=val_stats['AUC11'], head="VAL/AUC11", step=epoch)
-                log_writer.update(AUC12=val_stats['AUC12'], head="VAL/AUC12", step=epoch)
-                log_writer.update(AUC13=val_stats['AUC13'], head="VAL/AUC13", step=epoch)
-                log_writer.update(AUC14=val_stats['AUC14'], head="VAL/AUC14", step=epoch)
+                if args.dataset == 'rsna':
+                    log_writer.update(meanAUC=val_stats['auc_mean'], head="RSNA/valAUC", step=epoch)
+                    log_writer.update(test_loss=val_stats['loss'], head="RSNA/valLOSS", step=epoch)
+
+                if args.dataset == 'covidx':
+                    log_writer.update(ACC=val_stats['acc'], head="covidx/valACC", step=epoch)
+                    log_writer.update(test_loss=val_stats['loss'], head="covidx/valLOSS", step=epoch)
+
+                if args.dataset == 'chexpert':
+                    log_writer.update(meanAUC=val_stats['auc_mean'], head="VAL/meanAUC", step=epoch)
+                    log_writer.update(test_loss=val_stats['loss'], head="VAL/perf", step=epoch)
+                    log_writer.update(AUC1=val_stats['AUC1'], head="VAL/AUC1", step=epoch)
+                    log_writer.update(AUC2=val_stats['AUC2'], head="VAL/AUC2", step=epoch)
+                    log_writer.update(AUC3=val_stats['AUC3'], head="VAL/AUC3", step=epoch)
+                    log_writer.update(AUC4=val_stats['AUC4'], head="VAL/AUC4", step=epoch)
+                    log_writer.update(AUC5=val_stats['AUC5'], head="VAL/AUC5", step=epoch)
+                    # log_writer.update(AUC6=val_stats['AUC6'], head="VAL/AUC6", step=epoch)
+                    # log_writer.update(AUC7=val_stats['AUC7'], head="VAL/AUC7", step=epoch)
+                    # log_writer.update(AUC8=val_stats['AUC8'], head="VAL/AUC8", step=epoch)
+                    # log_writer.update(AUC9=val_stats['AUC9'], head="VAL/AUC9", step=epoch)
+                    # log_writer.update(AUC10=val_stats['AUC10'], head="VAL/AUC10", step=epoch)
+                    # log_writer.update(AUC11=val_stats['AUC11'], head="VAL/AUC11", step=epoch)
+                    # log_writer.update(AUC12=val_stats['AUC12'], head="VAL/AUC12", step=epoch)
+                    # log_writer.update(AUC13=val_stats['AUC13'], head="VAL/AUC13", step=epoch)
+                    # log_writer.update(AUC14=val_stats['AUC14'], head="VAL/AUC14", step=epoch)
 
 
         if data_loader_test is not None:
-            test_stats = evaluate(data_loader_test, model, device)   # auc_mean
+            test_stats = evaluate(data_loader_test, model, device, args)   # auc_mean
             # yaoyinuo 2022.5.7
             # print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
             # if max_accuracy < test_stats["acc1"]:
             #     max_accuracy = test_stats["acc1"]
-            print("Mean AUC of the network on the {} TEST images: {:.4f}".format(len(dataset_val), test_stats['auc_mean']))
+            if args.dataset == 'covidx':
+                print("Mean ACC of the network on the {} TEST images: {:.4f}".format(len(dataset_val), test_stats['acc']))
+            else:
+                print("Mean AUC of the network on the {} TEST images: {:.4f}".format(len(dataset_val), test_stats['auc_mean']))
             # #########################################################
             print("###################################################################")
-            print(test_stats['auc_mean'])
-            print(max_auc)
-            print(type(test_stats['auc_mean']))
-            print(type(max_auc))
+
+            if args.dataset == 'covidx':
+                print(test_stats['acc'])
+                print(max_acc)
+                # print(type(test_stats['acc']))
+                # print(type(max_acc))
+
+            else:
+                print(test_stats['auc_mean'])
+                print(max_auc)
+                # print(type(test_stats['auc_mean']))
+                # print(type(max_auc))
 
             # print(f'Max accuracy: {max_accuracy:.2f}%')
 
             if log_writer is not None:
                 # log_writer.update(test_acc1=test_stats['acc1'], head="perf", step=epoch)
                 # log_writer.update(test_acc5=test_stats['acc5'], head="perf", step=epoch)
-                log_writer.update(meanAUC=test_stats['auc_mean'], head="TEST/meanAUC", step=epoch)
-                log_writer.update(test_loss=test_stats['loss'], head="TEST/perf", step=epoch)
-                log_writer.update(AUC1=test_stats['AUC1'], head="TEST/AUC1", step=epoch)
-                log_writer.update(AUC2=test_stats['AUC2'], head="TEST/AUC2", step=epoch)
-                log_writer.update(AUC3=test_stats['AUC3'], head="TEST/AUC3", step=epoch)
-                log_writer.update(AUC4=test_stats['AUC4'], head="TEST/AUC4", step=epoch)
-                log_writer.update(AUC5=test_stats['AUC5'], head="TEST/AUC5", step=epoch)
-                log_writer.update(AUC6=test_stats['AUC6'], head="TEST/AUC6", step=epoch)
-                log_writer.update(AUC7=test_stats['AUC7'], head="TEST/AUC7", step=epoch)
-                log_writer.update(AUC8=test_stats['AUC8'], head="TEST/AUC8", step=epoch)
-                log_writer.update(AUC9=test_stats['AUC9'], head="TEST/AUC9", step=epoch)
-                log_writer.update(AUC10=test_stats['AUC10'], head="TEST/AUC10", step=epoch)
-                log_writer.update(AUC11=test_stats['AUC11'], head="TEST/AUC11", step=epoch)
-                log_writer.update(AUC12=test_stats['AUC12'], head="TEST/AUC12", step=epoch)
-                log_writer.update(AUC13=test_stats['AUC13'], head="TEST/AUC13", step=epoch)
-                log_writer.update(AUC14=test_stats['AUC14'], head="TEST/AUC14", step=epoch)
+                if args.dataset == 'rsna':
+                    log_writer.update(meanAUC=test_stats['auc_mean'], head="RSNA/testAUC", step=epoch)
+                    log_writer.update(test_loss=test_stats['loss'], head="RSNA/testLOSS", step=epoch)
+
+                if args.dataset == 'covidx':
+                    log_writer.update(ACC=test_stats['acc'], head="covidx/testACC", step=epoch)
+                    log_writer.update(test_loss=test_stats['loss'], head="covidx/testLOSS", step=epoch)                    
+
+                if args.dataset == 'chexpert':
+                    log_writer.update(meanAUC=test_stats['auc_mean'], head="TEST/meanAUC", step=epoch)
+                    log_writer.update(test_loss=test_stats['loss'], head="TEST/perf", step=epoch)
+                    log_writer.update(AUC1=test_stats['AUC1'], head="TEST/AUC1", step=epoch)
+                    log_writer.update(AUC2=test_stats['AUC2'], head="TEST/AUC2", step=epoch)
+                    log_writer.update(AUC3=test_stats['AUC3'], head="TEST/AUC3", step=epoch)
+                    log_writer.update(AUC4=test_stats['AUC4'], head="TEST/AUC4", step=epoch)
+                    log_writer.update(AUC5=test_stats['AUC5'], head="TEST/AUC5", step=epoch)
+                    # log_writer.update(AUC6=test_stats['AUC6'], head="TEST/AUC6", step=epoch)
+                    # log_writer.update(AUC7=test_stats['AUC7'], head="TEST/AUC7", step=epoch)
+                    # log_writer.update(AUC8=test_stats['AUC8'], head="TEST/AUC8", step=epoch)
+                    # log_writer.update(AUC9=test_stats['AUC9'], head="TEST/AUC9", step=epoch)
+                    # log_writer.update(AUC10=test_stats['AUC10'], head="TEST/AUC10", step=epoch)
+                    # log_writer.update(AUC11=test_stats['AUC11'], head="TEST/AUC11", step=epoch)
+                    # log_writer.update(AUC12=test_stats['AUC12'], head="TEST/AUC12", step=epoch)
+                    # log_writer.update(AUC13=test_stats['AUC13'], head="TEST/AUC13", step=epoch)
+                    # log_writer.update(AUC14=test_stats['AUC14'], head="TEST/AUC14", step=epoch)
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                          **{f'val_{k}': v for k, v in val_stats.items()},

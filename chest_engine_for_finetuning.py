@@ -18,6 +18,7 @@ import torch
 
 from timm.data import Mixup
 from timm.utils import accuracy, ModelEma
+import torch.nn.functional as F
 
 import utils
 from sklearn.metrics import roc_auc_score
@@ -27,13 +28,18 @@ import numpy as np
 # os.environ['MASTER_PORT'] = '12123'
 # os.environ['CUDA_VISIBLE_DEVICES'] = 0
 
-def train_class_batch(model, samples, target, criterion):
+def train_class_batch(model, samples, target, criterion, dataset):
     outputs = model(samples)
     # print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
     # print(outputs.shape)
     # print(target.shape)
-    print(samples.shape)
-    loss = criterion(outputs, target)
+    # print(samples.shape)
+    # print(outputs.shape)
+    # print(target.shape)
+    if dataset == 'chexpert':
+        loss = criterion(outputs, target)
+    else:
+        loss = criterion(outputs.squeeze(dim=-1), target.float())
     
     return loss, outputs
 
@@ -48,7 +54,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
                     start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None):
+                    num_training_steps_per_epoch=None, update_freq=None, mydataset='covidx'):
     model.train(True)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -84,11 +90,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if loss_scaler is None:
             samples = samples.half()
             loss, output = train_class_batch(
-                model, samples, targets, criterion)
+                model, samples, targets, criterion, mydataset)
         else:
             with torch.cuda.amp.autocast():
                 loss, output = train_class_batch(
-                    model, samples, targets, criterion)
+                    model, samples, targets, criterion, mydataset)
                 # yaoyinuo 2022.5.2
                 # loss, output = train_class_batch(
                 #     model, samples.type(torch.float32), targets.type(torch.int64), criterion)
@@ -169,9 +175,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device):
+def evaluate(data_loader, model, device, args):
     # yaoyinuo 2022.5.7
+    # criterion = torch.nn.BCEWithLogitsLoss()
+
+    # if args.dataset == 'chexpert':
     criterion = torch.nn.BCEWithLogitsLoss()
+
     # criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -195,7 +205,11 @@ def evaluate(data_loader, model, device):
         with torch.cuda.amp.autocast():
             output = model(images)
             outPRED = torch.cat((outPRED, output), 0)
-            loss = criterion(output, target)
+            # loss = criterion(output, target)
+            if args.dataset == 'chexpert':
+                loss = criterion(output, target)
+            else:
+                loss = criterion(output.squeeze(dim=-1), target.float())
 
         batch_size = images.shape[0]
         metric_logger.update(loss=loss.item())
@@ -209,35 +223,65 @@ def evaluate(data_loader, model, device):
     # yaoyinuo 2022.5.7
     # acc1, acc5 = accuracy(output, target, topk=(1, 5))
     aucs = []
-    for i in range(14):
-        aucs.append(roc_auc_score(tgt_np[:, i], output_np[:, i]))
-        
-    auc_mean = np.array(aucs).mean()
+    # for i in range(14):
 
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    metric_logger.update(AUC1=aucs[0])
-    metric_logger.update(AUC2=aucs[1])
-    metric_logger.update(AUC3=aucs[2])
-    metric_logger.update(AUC4=aucs[3])
-    metric_logger.update(AUC5=aucs[4])
-    metric_logger.update(AUC6=aucs[5])
-    metric_logger.update(AUC7=aucs[6])
-    metric_logger.update(AUC8=aucs[7])
-    metric_logger.update(AUC9=aucs[8])
-    metric_logger.update(AUC10=aucs[9])
-    metric_logger.update(AUC11=aucs[10])
-    metric_logger.update(AUC12=aucs[11])
-    metric_logger.update(AUC13=aucs[12])
-    metric_logger.update(AUC14=aucs[13])
+    if args.dataset == 'rsna':
+        pred = torch.max(F.sigmoid(outPRED), dim=1)[1]
+        output_np = pred.data.cpu().numpy().squeeze()
+        aucs.append(roc_auc_score(tgt_np, output_np))
+        auc_mean = aucs[0]
 
-    # metric_logger.update(auc=aucs)
-    metric_logger.update(auc_mean=auc_mean)
-    print("AUC:")
-    print(aucs)
-    print("mean AUC: {:.4f}".format(auc_mean))
+        metric_logger.synchronize_between_processes()
+        # metric_logger.update(AUC1=aucs[0])
+        metric_logger.update(auc_mean=auc_mean)
+        # if ifval:
+        #     writer.add_scalar('rsna/val', aucs[0], epoch)
+        # else:
+        #     writer.add_scalar('rsna/test', aucs[0], epoch)
+    elif args.dataset == 'covidx':
+        pred = torch.max(F.sigmoid(outPRED), dim=1)[1]
+        output_np = pred.data.cpu().numpy().squeeze()
+        acc = (tgt_np == output_np).sum()
+        acc /= len(tgt_np)
+
+        metric_logger.synchronize_between_processes()
+        metric_logger.update(acc=acc)
+
+        print("ACC:")
+        print(acc)
+
+
+    elif args.dataset == 'chexpert':
+        for i in range(5):
+            aucs.append(roc_auc_score(tgt_np[:, i], output_np[:, i]))
+            
+        auc_mean = np.array(aucs).mean()
+
+        # gather the stats from all processes
+        metric_logger.synchronize_between_processes()
+        metric_logger.update(AUC1=aucs[0])
+        metric_logger.update(AUC2=aucs[1])
+        metric_logger.update(AUC3=aucs[2])
+        metric_logger.update(AUC4=aucs[3])
+        metric_logger.update(AUC5=aucs[4])
+        # metric_logger.update(AUC6=aucs[5])
+        # metric_logger.update(AUC7=aucs[6])
+        # metric_logger.update(AUC8=aucs[7])
+        # metric_logger.update(AUC9=aucs[8])
+        # metric_logger.update(AUC10=aucs[9])
+        # metric_logger.update(AUC11=aucs[10])
+        # metric_logger.update(AUC12=aucs[11])
+        # metric_logger.update(AUC13=aucs[12])
+        # metric_logger.update(AUC14=aucs[13])
+
+        # metric_logger.update(auc=aucs)
+        metric_logger.update(auc_mean=auc_mean)
+
+        print("AUC:")
+        print(aucs)
+        print("mean AUC: {:.4f}".format(auc_mean))
     # print('* Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f} loss {losses.global_avg:.3f}'
     #       .format(top1=metric_logger.acc1, top5=metric_logger.acc5, losses=metric_logger.loss))
 
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    # return auc_mean
+        # return auc_mean
